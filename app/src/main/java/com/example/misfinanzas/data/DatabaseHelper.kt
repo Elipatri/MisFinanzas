@@ -1,100 +1,161 @@
 package com.example.misfinanzas.data
-// data/db/DatabaseHelper.kt
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
+import com.mis_finanzas.model.Categoria
+import com.mis_finanzas.model.Gasto
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "MisFinanzasDB", null, 1) {
+class DatabaseHelper(context: Context) :
+    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
-    // Nombres de tablas y columnas
     companion object {
-        private const val TABLE_CATEGORIA = "Categoria"
-        private const val TABLE_GASTO = "Gasto"
-        // ... (Constantes de columnas: CAT_ID, CAT_NOMBRE, GAS_MONTO, GAS_FECHA, etc.)
-        // Asumiendo que tenemos los ID de drawable mock:
-        val MOCK_ICON = mapOf("Alimentación" to R.drawable.ic_food, "Transporte" to R.drawable.ic_bus)
+        private const val DATABASE_NAME = "MisFinanzasDB"
+        private const val DATABASE_VERSION = 1
+
+        // Table and Columns
+        private const val TABLE_GASTOS = "gastos"
+        private const val COLUMN_ID = "id"
+        private const val COLUMN_MONTO = "monto"
+        private const val COLUMN_DESCRIPCION = "descripcion"
+        private const val COLUMN_FECHA = "fecha" // Stored as TEXT (yyyy-MM-dd)
+        private const val COLUMN_CATEGORIA_NOMBRE = "categoria_nombre"
+
+        // Date format for storing in SQLite
+        private val SQLITE_DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+        // Predefined categories [cite: 5, 6]
+        val PREDEFINED_CATEGORIES = listOf(
+            Categoria("Alimentación", "🍽", "Verde", 800.00),
+            Categoria("Transporte", "🚌", "Azul", 300.00),
+            Categoria("Entretenimiento", "🎬", "Púrpura", 200.00),
+            Categoria("Vivienda", "🏠", "Rojo", 1500.00),
+            Categoria("Salud", "💊", "Rojo", 400.00),
+            Categoria("Café/Bebidas", "☕", "Café", 150.00),
+            Categoria("Compras", "🛒", "Naranja", 500.00),
+            Categoria("Otros", "📦", "Gris", 300.00)
+        )
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        // Crear tabla Categoria
-        db.execSQL("CREATE TABLE $TABLE_CATEGORIA (id_categoria INTEGER PRIMARY KEY, nombre TEXT, iconoResId INTEGER, colorHex TEXT, limiteMensual REAL)")
-        // Crear tabla Gasto
-        db.execSQL("CREATE TABLE $TABLE_GASTO (id_gasto INTEGER PRIMARY KEY, monto REAL, descripcion TEXT, fecha TEXT, id_categoria INTEGER, FOREIGN KEY(id_categoria) REFERENCES $TABLE_CATEGORIA(id_categoria))")
-
-        // Insertar Categorías Predefinidas
-        insertCategory(db, "Alimentación", MOCK_ICON["Alimentación"]!!, "#4CAF50", 800.00) // Verde
-        insertCategory(db, "Transporte", MOCK_ICON["Transporte"]!!, "#2196F3", 300.00) // Azul
-        insertCategory(db, "Entretenimiento", R.drawable.ic_entertainment, "#9C27B0", 200.00) // Púrpura
-        insertCategory(db, "Vivienda", R.drawable.ic_home, "#F44336", 1500.00) // Rojo
-        insertCategory(db, "Salud", R.drawable.ic_health, "#F44336", 400.00) // Rojo
-        insertCategory(db, "Café/Bebidas", R.drawable.ic_coffee, "#795548", 150.00) // Café
-        insertCategory(db, "Compras", R.drawable.ic_cart, "#FF9800", 500.00) // Naranja
-        insertCategory(db, "Otros", R.drawable.ic_box, "#9E9E9E", 300.00) // Gris
+        val createTable = "CREATE TABLE $TABLE_GASTOS (" +
+                "$COLUMN_ID INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "$COLUMN_MONTO REAL," +
+                "$COLUMN_DESCRIPCION TEXT," +
+                "$COLUMN_FECHA TEXT," +
+                "$COLUMN_CATEGORIA_NOMBRE TEXT)"
+        db.execSQL(createTable)
     }
 
-    private fun insertCategory(db: SQLiteDatabase, nombre: String, icon: Int, color: String, limite: Double) {
-        val values = ContentValues().apply {
-            put("nombre", nombre)
-            put("iconoResId", icon)
-            put("colorHex", color)
-            put("limiteMensual", limite)
-        }
-        db.insert(TABLE_CATEGORIA, null, values)
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        db.execSQL("DROP TABLE IF EXISTS $TABLE_GASTOS")
+        onCreate(db)
     }
 
-    // --- Pantalla 1: Registro ---
+    // --- CRUD Operations ---
 
-    fun getAllCategories(): List<Categoria> { /* ... */ }
-    fun getCategoryName(id: Int): String { /* ... */ return "Nombre Cat" }
-    fun getCategoryLimit(id: Int): Double { /* ... */ return 0.0 }
-
-    fun insertGasto(monto: Double, descripcion: String?, fecha: String, idCategoria: Int): Long {
-        // Guardar el gasto en SQLite [cite: 15, 119]
+    /**
+     * Saves a new expense[cite: 15].
+     * @return The ID of the new row or -1 if failed.
+     */
+    fun insertGasto(gasto: Gasto): Long {
         val db = this.writableDatabase
         val values = ContentValues().apply {
-            put("monto", monto)
-            put("descripcion", descripcion)
-            put("fecha", fecha)
-            put("id_categoria", idCategoria)
+            put(COLUMN_MONTO, gasto.monto)
+            put(COLUMN_DESCRIPCION, gasto.descripcion)
+            put(COLUMN_FECHA, SQLITE_DATE_FORMAT.format(gasto.fecha)) // Date to String
+            put(COLUMN_CATEGORIA_NOMBRE, gasto.categoriaNombre)
         }
-        return db.insert(TABLE_GASTO, null, values)
+        val id = db.insert(TABLE_GASTOS, null, values)
+        db.close()
+        return id
     }
 
-    fun getTotalMonthlyExpense(categoryId: Int, monthYear: String): Double {
-        // Calcular el total del mes actual de esa categoría [cite: 20, 125]
-        val db = this.readableDatabase
-        // SUBSTR(fecha, 4) extrae 'MM/AAAA' de 'DD/MM/AAAA'
-        val query = "SELECT SUM(monto) FROM $TABLE_GASTO WHERE id_categoria = ? AND SUBSTR(fecha, 4) = ?"
-        val cursor = db.rawQuery(query, arrayOf(categoryId.toString(), monthYear))
-        var total = 0.0
-        if (cursor.moveToFirst()) total = cursor.getDouble(0)
+    /**
+     * Deletes an expense[cite: 42].
+     * @return The number of rows affected.
+     */
+    fun deleteGasto(gastoId: Int): Int {
+        val db = this.writableDatabase
+        val rows = db.delete(
+            TABLE_GASTOS,
+            "$COLUMN_ID = ?",
+            arrayOf(gastoId.toString())
+        )
+        db.close()
+        return rows
+    }
+
+    /**
+     * Fetches all expenses, ordered by date (most recent first)[cite: 31, 32].
+     */
+    fun getAllGastos(): List<Gasto> {
+        val gastosList = mutableListOf<Gasto>()
+        // ORDER BY $COLUMN_FECHA DESC for most recent first [cite: 32]
+        val selectQuery = "SELECT * FROM $TABLE_GASTOS ORDER BY $COLUMN_FECHA DESC"
+        val db = this.writableDatabase
+        val cursor = db.rawQuery(selectQuery, null)
+
+        if (cursor.moveToFirst()) {
+            do {
+                try {
+                    val id = cursor.getInt(cursor.getColumnIndexOrThrow(COLUMN_ID))
+                    val monto = cursor.getDouble(cursor.getColumnIndexOrThrow(COLUMN_MONTO))
+                    val descripcion = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_DESCRIPCION))
+                    val fechaStr = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_FECHA))
+                    val categoriaNombre = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_CATEGORIA_NOMBRE))
+                    val fecha = SQLITE_DATE_FORMAT.parse(fechaStr) ?: Date()
+
+                    gastosList.add(Gasto(id, monto, descripcion, fecha, categoriaNombre))
+                } catch (e: Exception) {
+                    Log.e("DBHelper", "Error parsing Gasto: ${e.message}")
+                }
+            } while (cursor.moveToNext())
+        }
         cursor.close()
+        db.close()
+        return gastosList
+    }
+
+    /**
+     * Calculates the total expenses for a category in the current month[cite: 20].
+     */
+    fun getTotalGastoCategoriaMesActual(categoriaNombre: String): Double {
+        val db = this.readableDatabase
+        val currentMonthYear = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())
+
+        val selectQuery = "SELECT SUM($COLUMN_MONTO) FROM $TABLE_GASTOS " +
+                "WHERE $COLUMN_CATEGORIA_NOMBRE = ? AND STRFTIME('%Y-%m', $COLUMN_FECHA) = ?" // SQLite func
+
+        val cursor = db.rawQuery(selectQuery, arrayOf(categoriaNombre, currentMonthYear))
+
+        var total = 0.0
+        if (cursor.moveToFirst()) {
+            total = cursor.getDouble(0)
+        }
+        cursor.close()
+        db.close()
         return total
     }
 
-    // --- Pantalla 2: Consulta ---
-
-    fun getAllExpenses(): List<Gasto> {
-        // Consulta con JOIN a Categoria, ordenada por fecha DESC [cite: 31, 32, 157, 158]
-        // Se requiere una conversión manual de la fecha (DD/MM/AAAA) a un formato comparable para el ordenamiento
-        return emptyList() /* ... */
-    }
-
-    fun deleteGasto(id: Int): Int {
-        // Eliminar el gasto de la base de datos [cite: 42, 171]
-        val db = this.writableDatabase
-        return db.delete(TABLE_GASTO, "id_gasto = ?", arrayOf(id.toString()))
-    }
-
-    fun getTotalGeneral(): Double {
-        // Sumar TODOS los gastos [cite: 50, 183]
+    /**
+     * Calculates the total of ALL expenses[cite: 50].
+     */
+    fun getTotalGeneralGastos(): Double {
         val db = this.readableDatabase
-        val cursor = db.rawQuery("SELECT SUM(monto) FROM $TABLE_GASTO", null)
+        val selectQuery = "SELECT SUM($COLUMN_MONTO) FROM $TABLE_GASTOS"
+        val cursor = db.rawQuery(selectQuery, null)
+
         var total = 0.0
-        if (cursor.moveToFirst()) total = cursor.getDouble(0)
+        if (cursor.moveToFirst()) {
+            total = cursor.getDouble(0)
+        }
         cursor.close()
+        db.close()
         return total
     }
 }

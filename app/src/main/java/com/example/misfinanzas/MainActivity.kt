@@ -1,26 +1,41 @@
-package com.example.misfinanzas
+package com.mis_finanzas
 
-import android.content.Intent
 import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.ViewModelProvider
+import com.mis_finanzas.db.DatabaseHelper
+import com.mis_finanzas.ui.theme.MisFinanzasTheme
+import com.mis_finanzas.ui.screens.MisGastosScreen // Pantalla 2
+import com.mis_finanzas.viewmodel.GastoViewModel
+import com.mis_finanzas.viewmodel.GastoViewModelFactory
 
-// Asumiendo que esta es la actividad de lanzamiento (LAUNCHER) definida en el AndroidManifest.
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
-        // La aplicación debe mostrar la Pantalla 2 (Mis Gastos) como punto de entrada.
+        // 1. Inicializar DatabaseHelper
+        val dbHelper = DatabaseHelper(applicationContext)
 
-        // 1. Crear el Intent para navegar a MisGastosActivity.
-        val intent = Intent(this, MisGastosActivity::class.java)
+        // 2. Crear el Factory para inyectar la dependencia del Helper/Repository al ViewModel
+        // Se asume que GastoViewModelFactory usa dbHelper para crear el GastoRepository.
+        val factory = GastoViewModelFactory(dbHelper)
 
-        // 2. Iniciar la actividad de destino.
-        startActivity(intent)
+        // 3. Obtener el GastoViewModel
+        val viewModel = ViewModelProvider(this, factory)[GastoViewModel::class.java]
 
-        // 3. Finalizar MainActivity. Esto evita que el usuario pueda volver a una pantalla de inicio vacía
-        //    al presionar el botón 'Atrás' desde MisGastosActivity.
-        finish()
-
-        // Nota: No es necesario llamar a setContentView() ya que la actividad se finaliza inmediatamente.
+        setContent {
+            MisFinanzasTheme { // Usa el tema de tu aplicación
+                // Surface (similar al contenedor principal)
+                Surface(color = Color(0xFF1C1E20)) { // Color de fondo oscuro
+                    // Cargar la pantalla principal (Pantalla 2: Mis Gastos)
+                    MisGastosScreen(viewModel)
+                }
+            }
+        }
     }
 }

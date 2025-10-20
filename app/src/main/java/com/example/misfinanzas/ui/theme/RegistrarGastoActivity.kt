@@ -1,126 +1,170 @@
 package com.example.misfinanzas.ui.theme
 
-import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
-import android.widget.Button
-import android.widget.Spinner
-import android.widget.Toast // Reemplazar con Snackbar
+import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.snackbar.Snackbar
-import com.google.android.material.textfield.TextInputEditText
+import com.mis_finanzas.db.DatabaseHelper
+import com.mis_finanzas.model.Categoria
+import com.mis_finanzas.model.Gasto
+import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.*
 
 class RegistrarGastoActivity : AppCompatActivity() {
-
     private lateinit var dbHelper: DatabaseHelper
-    private var selectedCategoryId: Int? = null
-    private var selectedCategoryLimit: Double = 0.0
-    private lateinit var tietMonto: TextInputEditText
-    private lateinit var tietFecha: TextInputEditText
-    private lateinit var tietDescripcion: TextInputEditText
-    private lateinit var categorySpinner: Spinner
+    private lateinit var etMonto: EditText
+    private lateinit var etDescripcion: EditText
+    private lateinit var etFecha: EditText
+    private lateinit var spCategoria: Spinner
+    private var selectedCategoria: Categoria? = null
+
+    // Date format for UI (día/mes/año) [cite: 24]
+    private val displayDateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_registrar_gasto)
+        setContentView(R.layout.activity_registrar_gasto) // Replace with your layout file name
 
         dbHelper = DatabaseHelper(this)
+        etMonto = findViewById(R.id.etMonto) // Assuming ID etMonto
+        etDescripcion = findViewById(R.id.etDescripcion) // Assuming ID etDescripcion
+        etFecha = findViewById(R.id.etFecha) // Assuming ID etFecha
+        spCategoria = findViewById(R.id.spCategoria) // Assuming ID spCategoria
 
-        tietMonto = findViewById(R.id.tiet_monto)
-        tietFecha = findViewById(R.id.tiet_fecha)
-        tietDescripcion = findViewById(R.id.tiet_descripcion) // La descripción es opcional [cite: 13, 118]
-        categorySpinner = findViewById(R.id.spinner_categoria)
+        // Date Picker Setup [cite: 22]
+        etFecha.setText(displayDateFormat.format(Date())) // Default to current date [cite: 25]
+        etFecha.setOnClickListener { showDatePickerDialog() }
 
-        setupCategorySpinner()
-        setupDateField()
+        loadCategoriasSpinner()
 
-        findViewById<Button>(R.id.btn_guardar_gasto).setOnClickListener { saveGasto() }
+        findViewById<Button>(R.id.btnGuardarGasto).setOnClickListener {
+            guardarGasto()
+        }
     }
 
-    private fun setupDateField() {
-        // Por defecto: fecha actual [cite: 25, 132]
-        tietFecha.setText(SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date()))
-        tietFecha.setOnClickListener { showDatePicker() } // Mostrar DatePickerDialog [cite: 23, 130]
-        tietFecha.keyListener = null // Deshabilita el teclado
+    // --- Category Dropdown Setup [cite: 26, 27] ---
+    private fun loadCategoriasSpinner() {
+        val categorias = DatabaseHelper.PREDEFINED_CATEGORIES
+
+        // Adapter shows: ícono + nombre + límite mensual [cite: 28]
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            categorias
+        )
+        spCategoria.adapter = adapter
+
+        spCategoria.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>, view: View, position: Int, id: Long) {
+                selectedCategoria = parent.getItemAtPosition(position) as Categoria
+            }
+            override fun onNothingSelected(parent: AdapterView<*>) { /* Do nothing */ }
+        }
     }
 
-    private fun showDatePicker() {
+    // --- Date Picker Dialog [cite: 23] ---
+    private fun showDatePickerDialog() {
         val c = Calendar.getInstance()
-        DatePickerDialog(this, { _, y, m, d ->
-            // Formato: día/mes/año [cite: 24, 131]
-            val date = String.format("%02d/%02d/%d", d, m + 1, y)
-            tietFecha.setText(date)
+        try {
+            c.time = displayDateFormat.parse(etFecha.text.toString()) ?: Date()
+        } catch (e: ParseException) { /* If parsing fails, use current date */ }
+
+        DatePickerDialog(this, { _, year, month, dayOfMonth ->
+            val newDate = Calendar.getInstance()
+            newDate.set(year, month, dayOfMonth)
+            etFecha.setText(displayDateFormat.format(newDate.time)) // Format día/mes/año [cite: 24]
         }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show()
     }
 
-    private fun setupCategorySpinner() {
-        val categories = dbHelper.getAllCategories() // Obtiene todas las categorías [cite: 134]
-        val adapter = CategoriaSpinnerAdapter(this, categories)
-        categorySpinner.adapter = adapter
+    // --- Save Logic [cite: 9] ---
+    private fun guardarGasto() {
+        val montoStr = etMonto.text.toString()
+        val descripcion = etDescripcion.text.toString().trim()
+        val fecha: Date
 
-        categorySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
-                val selectedCategory = parent.getItemAtPosition(position) as Categoria
-                selectedCategoryId = selectedCategory.id
-                selectedCategoryLimit = selectedCategory.limiteMensual
-            }
-            override fun onNothingSelected(parent: AdapterView<*>) { /* ... */ }
-        }
-    }
-
-    private fun saveGasto() {
-        val monto = tietMonto.text.toString().toDoubleOrNull()
-        val fecha = tietFecha.text.toString()
-
-        // 1. Validación: Monto > 0 (usar AlertDialog) [cite: 11, 116]
+        // 1. Validation: Monto > 0 [cite: 10, 11]
+        val monto = montoStr.toDoubleOrNull()
         if (monto == null || monto <= 0) {
-            showAlertDialog("Error de Monto", "Verificar que el monto sea mayor a $0.00.")
+            showAlert("Error de Monto", "Verificar que el monto sea mayor a 0.")
             return
         }
 
-        // 2. Validación: Categoría seleccionada (usar AlertDialog) [cite: 12, 117]
-        if (selectedCategoryId == null) {
-            showAlertDialog("Error de Categoría", "Validar que se haya seleccionado una categoría.")
+        // 2. Validation: Categoría selected [cite: 10, 12]
+        val categoria = selectedCategoria
+        if (categoria == null) {
+            showAlert("Error de Categoría", "Validar que se haya seleccionado una categoría.")
             return
         }
 
-        // 3. Guardar y Validar Límite
-        val descripcion = tietDescripcion.text.toString().trim().ifEmpty { null }
-        val newGastoId = dbHelper.insertGasto(monto, descripcion, fecha, selectedCategoryId!!)
+        try {
+            fecha = displayDateFormat.parse(etFecha.text.toString()) ?: Date()
+        } catch (e: ParseException) {
+            showAlert("Error de Fecha", "El formato de la fecha no es válido.")
+            return
+        }
 
-        if (newGastoId > 0) {
-            // Validar Límite Mensual [cite: 19, 124]
-            checkMonthlyLimit(selectedCategoryId!!, monto, fecha, selectedCategoryLimit)
+        // Action: Guardar gasto [cite: 14, 15]
+        val nuevoGasto = Gasto(
+            monto = monto,
+            descripcion = descripcion,
+            fecha = fecha,
+            categoriaNombre = categoria.nombre
+        )
+        val newId = dbHelper.insertGasto(nuevoGasto)
 
-            // Mostrar Snackbar de ÉXITO (color verde) [cite: 16, 120, 121]
-            showSnackbar("✓ Gasto guardado correctamente", R.color.green_success)
+        if (newId > 0) {
+            // Show Success Snackbar [cite: 16]
+            showSnackbar("✓ Gasto guardado correctamente", Color.parseColor("#4CAF50")) // Green color
 
-            // Limpiar los campos [cite: 18, 123]
-            clearFields()
+            // Check Monthly Limit [cite: 19]
+            checkLimiteMensual(categoria)
 
-            // Navegar automáticamente a la Pantalla 2 [cite: 17, 122]
+            // Clean fields [cite: 18]
+            etMonto.setText("")
+            etDescripcion.setText("")
+            etFecha.setText(displayDateFormat.format(Date())) // Reset to current date
+            spCategoria.setSelection(0) // Reset spinner
+
+            // Navigate to Pantalla 2 [cite: 17]
             startActivity(Intent(this, MisGastosActivity::class.java))
             finish()
+        } else {
+            showSnackbar("X Error al guardar gasto", Color.RED)
         }
     }
 
-    private fun checkMonthlyLimit(id: Int, nuevoMonto: Double, fecha: String, limite: Double) {
-        val monthYear = fecha.substring(3) // Extraer MM/AAAA
-        val totalMes = dbHelper.getTotalMonthlyExpense(id, monthYear)
+    // --- Limit Check (Validación de Límite Mensual) [cite: 19, 20] ---
+    private fun checkLimiteMensual(categoria: Categoria) {
+        val totalMes = dbHelper.getTotalGastoCategoriaMesActual(categoria.nombre)
 
-        if (totalMes + nuevoMonto > limite) {
-            // Mostrar Snackbar de ADVERTENCIA (color naranja) [cite: 21, 126, 127]
-            val catNombre = dbHelper.getCategoryName(id)
-            val msg = "⚠ Has excedido el límite de [$catNombre]: \$%.2f de \$%.2f".format(totalMes + nuevoMonto, limite)
-            showSnackbar(msg, R.color.orange_warning)
+        if (totalMes > categoria.limiteMensual) {
+            // Show Warning Snackbar [cite: 21]
+            val warningMsg = "⚠ Has excedido el límite de ${categoria.nombre}: " +
+                    "\$${String.format("%.2f", totalMes)} de " +
+                    "\$${String.format("%.2f", categoria.limiteMensual)}"
+            showSnackbar(warningMsg, Color.parseColor("#FF9800")) // Orange color
         }
     }
 
-    // Funciones helper: showAlertDialog, showSnackbar, clearFields
-    private fun showAlertDialog(title: String, message: String) { /* ... */ }
-    private fun showSnackbar(message: String, colorResId: Int) { /* ... */ }
-    private fun clearFields() { /* ... */ }
+    // --- Utility Functions (AlertDialog and Snackbar) ---
+    private fun showAlert(title: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showSnackbar(message: String, color: Int) {
+        // Use android.R.id.content as a view reference
+        Snackbar.make(findViewById(android.R.id.content), message, Snackbar.LENGTH_LONG).apply {
+            view.setBackgroundColor(color)
+            show()
+        }
+    }
 }
